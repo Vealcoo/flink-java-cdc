@@ -1,0 +1,87 @@
+version: "3"
+services:
+  kafka:
+    image: confluentinc/cp-kafka:8.0.0
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+      - "9093:9093"
+    environment:
+      CLUSTER_ID: "BOCD4o3DR3aO1Gz3C6oWyQ"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - ./data/kafka:/var/lib/kafka/data
+
+  mongodb_primary:
+    image: mongo:7.0
+    container_name: mongodb_primary
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin
+    ports:
+      - 27017:27017
+    volumes:
+      - ./data/mongodb/primary:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile
+      - ./script/init-replica.sh:/init-replica.sh
+    command: ["mongod", "--replSet", "rs0", "--keyFile", "/etc/mongo-keyfile"]
+
+  mongodb_secondary:
+    image: mongo:7.0
+    container_name: mongodb_secondary
+    depends_on:
+      - mongodb_primary
+    volumes:
+      - ./data/mongodb/secondary:/data/db
+      - ./mongo-keyfile:/etc/mongo-keyfile
+    command: ["mongod", "--replSet", "rs0", "--keyFile", "/etc/mongo-keyfile"]
+
+  mongodb_arbiter:
+    image: mongo:7.0
+    container_name: mongodb_arbiter
+    depends_on:
+      - mongodb_primary
+    volumes:
+      - ./mongo-keyfile:/etc/mongo-keyfile
+    command: ["mongod", "--replSet", "rs0", "--keyFile", "/etc/mongo-keyfile"]
+
+  jobmanager:
+    image: flink:1.20
+    container_name: jobmanager
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+    volumes:
+      - ./data/flink/checkpoints:/checkpoint-dir
+
+  taskmanager:
+    image: flink:1.20
+    container_name: taskmanager
+    depends_on:
+      - jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 1
+    volumes:
+      - ./data/flink/checkpoints:/checkpoint-dir
